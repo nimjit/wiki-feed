@@ -198,8 +198,10 @@ export async function buildSession() {
 export async function pickSection(title, seenMap) {
   let { sections, html } = await api.getArticleData(title)
   const parsed = api.parseSections(html, sections)
-  const candidates = parsed
-    .filter(s => s.score > 0)
+  const withScore = parsed.filter(s => s.score > 0)
+  console.log('[pickSection]', title, '→ parsed:', parsed.length, 'score>0:', withScore.length,
+    withScore.length ? 'best: ' + withScore[0].heading + ' (' + withScore[0].wordCount + 'w)' : '')
+  const candidates = withScore
     .filter(s => !seenMap.has(title + '#' + s.anchor))
     .sort((a, b) => b.score - a.score)
 

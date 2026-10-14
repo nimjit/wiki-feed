@@ -22,9 +22,8 @@ export function init() {
   SCREENS.forEach(name => {
     document.getElementById('nav-' + name)?.addEventListener('click', () => navigate(name))
   })
-  // Start on feed
+  // Start on feed — navigate() calls initFeed() already
   navigate('feed')
-  initFeed()
 }
 
 // ─── Saved screen ─────────────────────────────────────────────────────────────

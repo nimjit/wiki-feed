@@ -23,35 +23,57 @@ let session = []
 let sessionIdx = 0
 let cardHistory = []    // for swipe-back
 let currentCard = null
+let feedLoading = false
 
 // ─── Build & display the feed ─────────────────────────────────────────────────
 export async function initFeed() {
-  // Don't overwrite an active session when switching tabs
+  // Don't overwrite an active session when switching tabs, and don't run concurrently
   if (session.length > 0 && sessionIdx < session.length) return
+  if (feedLoading) return
+  feedLoading = true
 
   const stack = document.getElementById('card-stack')
   stack.innerHTML = '<div class="card-loading"><div class="spinner"></div><span>Building feed…</span></div>'
 
-  const follows = await db.getAll('follows')
-  if (follows.length === 0) {
-    showOnboarding()
-    return
-  }
+  try {
+    const follows = await db.getAll('follows')
+    if (follows.length === 0) {
+      showOnboarding()
+      return
+    }
 
-  session = await buildSession()
-  sessionIdx = 0
-  cardHistory = []
+    session = await buildSession()
+    sessionIdx = 0
+    cardHistory = []
 
-  if (session.length === 0) {
+    if (session.length === 0) {
+      stack.innerHTML = `<div class="empty-state">
+        <h3>No cards yet</h3>
+        <p>Your followed articles are being indexed. Try again in a moment.</p>
+        <button class="btn-primary" id="feed-retry-btn">Refresh</button>
+      </div>`
+      stack.querySelector('#feed-retry-btn').addEventListener('click', () => {
+        session = []
+        initFeed()
+      })
+      return
+    }
+
+    await showNextCard()
+  } catch (e) {
+    console.error('Feed init failed:', e)
     stack.innerHTML = `<div class="empty-state">
-      <h3>No cards yet</h3>
-      <p>Your followed articles are being indexed. Try again in a moment.</p>
-      <button class="btn-primary" onclick="location.reload()">Refresh</button>
+      <h3>Couldn't load feed</h3>
+      <p>${escHtml(e.message)}</p>
+      <button class="btn-primary" id="feed-retry-btn">Try again</button>
     </div>`
-    return
+    stack.querySelector('#feed-retry-btn').addEventListener('click', () => {
+      session = []
+      initFeed()
+    })
+  } finally {
+    feedLoading = false
   }
-
-  await showNextCard()
 }
 
 function showOnboarding() {
@@ -339,8 +361,8 @@ function attachSwipe(card) {
   let dragging = false
 
   card.addEventListener('pointerdown', e => {
-    // Only start drag if not clicking a button/link
-    if (e.target.closest('button, a, .wiki-link, .prov-step')) return
+    // Only start drag from meta/actions zones — not the scrollable body content
+    if (e.target.closest('.card-body, button, a, .wiki-link, .prov-step')) return
     startY = e.clientY
     dragging = true
     card.setPointerCapture(e.pointerId)

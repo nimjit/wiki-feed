@@ -29,7 +29,6 @@ async function apiFetch(base, params, retries = 2) {
 
 function wpFetch(params, retries = 2) { return apiFetch(WP_API, params, retries) }
 function wdFetch(params, retries = 2) { return apiFetch(WD_API, params, retries) }
-}
 
 // ─── Article content ──────────────────────────────────────────────────────────
 
@@ -155,21 +154,47 @@ export function parseSections(fullHTML, sectionsMeta) {
     anchorMap[s.anchor] = s
   }
 
-  const headings = [...doc.querySelectorAll('h2[id], h3[id]')]
+  // Support all Wikipedia HTML variants:
+  //   old:    <h2><span class="mw-headline" id="Foo">Foo</span></h2>
+  //   new:    <h2 id="Foo">Foo</h2>
+  //   parsoid: <div class="mw-heading mw-heading2"><h2 id="Foo">Foo</h2></div>
+  const headings = [...doc.querySelectorAll('h2, h3')]
+    .map(el => {
+      const anchor = el.id || el.querySelector('.mw-headline[id]')?.id || ''
+      if (!anchor) return null
+      // Heading text — strip edit-section markup
+      const hClone = el.cloneNode(true)
+      hClone.querySelectorAll('.mw-editsection').forEach(e => e.remove())
+      const headingText = (hClone.querySelector('.mw-headline')?.textContent || hClone.textContent || '').trim()
+      const toclevel = el.tagName === 'H2' ? 1 : 2
+      // In Parsoid HTML, <h2> is inside a <div class="mw-heading">;
+      // content siblings belong to THAT div, not to the <h2> itself.
+      const contentRoot = el.closest('.mw-heading') || el
+      return { el, contentRoot, anchor, headingText, toclevel }
+    })
+    .filter(Boolean)
+
+  // Debug: log what we found so browser console can show it
+  if (headings.length === 0) {
+    const firstH = doc.querySelector('h2, h3')
+    console.warn('[parseSections] 0 headings found.',
+      'sectionsMeta:', sectionsMeta.length,
+      'first h2/h3 html:', firstH?.outerHTML?.slice(0, 300) ?? 'none')
+  } else {
+    console.log('[parseSections]', headings.length, 'headings.',
+      'first:', headings[0].anchor, '/', headings[0].headingText,
+      'anchorMap keys:', Object.keys(anchorMap).slice(0, 3))
+  }
+
   const results = []
 
-  headings.forEach((heading, i) => {
-    const anchor = heading.id
-    const meta = anchorMap[anchor]
-    if (!meta) return
-
-    const toclevel = parseInt(meta.toclevel)
+  headings.forEach(({ el: heading, contentRoot, anchor, headingText, toclevel }, i) => {
     if (toclevel > 2) return  // skip sub-sub-sections
 
-    // Collect content until next h2/h3
+    // Collect siblings of contentRoot (not of heading itself — handles mw-heading wrappers)
     const contentEls = []
-    let node = heading.nextElementSibling
-    const nextBoundary = headings[i + 1]
+    let node = contentRoot.nextElementSibling
+    const nextBoundary = headings[i + 1]?.contentRoot
     while (node && node !== nextBoundary) {
       contentEls.push(node)
       node = node.nextElementSibling
@@ -183,8 +208,8 @@ export function parseSections(fullHTML, sectionsMeta) {
     const text = plainText(rawSectionHTML)
     const wc = wordCount(text)
 
-    // Scoring
-    const headingLower = (meta.line || '').toLowerCase().replace(/<[^>]+>/g, '').trim()
+    // Scoring — derived directly from DOM, no anchorMap lookup needed
+    const headingLower = headingText.toLowerCase()
     let score = 0
     if (SKIP_HEADINGS.has(headingLower)) {
       score = 0
