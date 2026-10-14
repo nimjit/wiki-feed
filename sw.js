@@ -1,4 +1,4 @@
-const CACHE = 'wikifeed-v1'
+const CACHE = 'wikifeed-v2'
 const SHELL = [
   './', './index.html', './style.css', './manifest.json',
   './src/app.js', './src/api.js', './src/db.js',

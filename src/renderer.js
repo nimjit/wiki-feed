@@ -2,7 +2,7 @@
 
 import { db } from './db.js'
 import * as api from './api.js'
-import { buildSession, pickSection, provenanceLabel } from './algorithm.js'
+import { buildSession, pickSection } from './algorithm.js'
 
 // ─── Icons (inline SVG) ───────────────────────────────────────────────────────
 const ICONS = {
@@ -14,20 +14,21 @@ const ICONS = {
   like:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>`,
   save:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>`,
   open:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`,
-  add:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`,
-  mute:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="3" y1="3" x2="21" y2="21"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/></svg>`,
+  share:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
 }
 
 // ─── Feed state ───────────────────────────────────────────────────────────────
 let session = []
 let sessionIdx = 0
-let cardHistory = []    // for swipe-back
+let cardHistory = []
 let currentCard = null
 let feedLoading = false
+let nextCardData = null        // pre-fetched {candidate, section, forIdx}
+let nextSessionCache = null    // pre-built next session array
+let buildingNextSession = false
 
 // ─── Build & display the feed ─────────────────────────────────────────────────
 export async function initFeed() {
-  // Don't overwrite an active session when switching tabs, and don't run concurrently
   if (session.length > 0 && sessionIdx < session.length) return
   if (feedLoading) return
   feedLoading = true
@@ -37,14 +38,12 @@ export async function initFeed() {
 
   try {
     const follows = await db.getAll('follows')
-    if (follows.length === 0) {
-      showOnboarding()
-      return
-    }
+    if (follows.length === 0) { showOnboarding(); return }
 
     session = await buildSession()
     sessionIdx = 0
     cardHistory = []
+    nextCardData = null
 
     if (session.length === 0) {
       stack.innerHTML = `<div class="empty-state">
@@ -52,25 +51,20 @@ export async function initFeed() {
         <p>Your followed articles are being indexed. Try again in a moment.</p>
         <button class="btn-primary" id="feed-retry-btn">Refresh</button>
       </div>`
-      stack.querySelector('#feed-retry-btn').addEventListener('click', () => {
-        session = []
-        initFeed()
-      })
+      stack.querySelector('#feed-retry-btn').addEventListener('click', () => { session = []; initFeed() })
       return
     }
 
     await showNextCard()
   } catch (e) {
     console.error('Feed init failed:', e)
+    const offline = !navigator.onLine
     stack.innerHTML = `<div class="empty-state">
-      <h3>Couldn't load feed</h3>
-      <p>${escHtml(e.message)}</p>
+      <h3>${offline ? 'You\'re offline' : 'Couldn\'t load feed'}</h3>
+      <p>${offline ? 'Saved articles are still available. Connect and try again.' : escHtml(e.message)}</p>
       <button class="btn-primary" id="feed-retry-btn">Try again</button>
     </div>`
-    stack.querySelector('#feed-retry-btn').addEventListener('click', () => {
-      session = []
-      initFeed()
-    })
+    stack.querySelector('#feed-retry-btn').addEventListener('click', () => { session = []; initFeed() })
   } finally {
     feedLoading = false
   }
@@ -90,53 +84,86 @@ function showOnboarding() {
   })
 }
 
-async function showNextCard(direction = 'up', attempts = 0) {
+async function showNextCard(attempts = 0) {
   if (sessionIdx >= session.length || attempts > 30) {
     showSessionEnd()
     return
   }
 
-  const candidate = session[sessionIdx]
+  // Start pre-building the next session when near the end of this one
+  if (!buildingNextSession && session.length - sessionIdx <= 3) {
+    buildingNextSession = true
+    buildSession().then(s => { nextSessionCache = s }).catch(() => {}).finally(() => { buildingNextSession = false })
+  }
+
+  const idxNow = sessionIdx
+  const candidate = session[idxNow]
   sessionIdx++
 
   const stack = document.getElementById('card-stack')
+  const hasPrefetch = nextCardData?.forIdx === idxNow
+  let loadingCard = null
 
-  // Build card (async — show loading while fetching)
-  const loadingCard = document.createElement('div')
-  loadingCard.className = 'card'
-  loadingCard.innerHTML = `<div class="card-loading"><div class="spinner"></div><span>Loading…</span></div>`
-  stack.appendChild(loadingCard)
+  if (!hasPrefetch) {
+    loadingCard = document.createElement('div')
+    loadingCard.className = 'card'
+    loadingCard.innerHTML = `<div class="card-loading"><div class="spinner"></div><span>Loading…</span></div>`
+    stack.appendChild(loadingCard)
+  }
 
   try {
-    const seenList = await db.getAll('seen')
-    const seenMap = new Map(seenList.map(s => [s.id, s]))
-    const section = await pickSection(candidate.title, seenMap)
+    let section
+    if (hasPrefetch) {
+      section = nextCardData.section
+      nextCardData = null
+    } else {
+      const seenList = await db.getAll('seen')
+      const seenMap = new Map(seenList.map(s => [s.id, s]))
+      section = await pickSection(candidate.title, seenMap)
+    }
 
     if (!section) {
-      // No good section — skip this candidate (sessionIdx already incremented above)
-      loadingCard.remove()
-      await showNextCard(direction, attempts + 1)
+      loadingCard?.remove()
+      await showNextCard(attempts + 1)
       return
     }
 
     const card = buildCard(candidate, section)
-    loadingCard.replaceWith(card)
+    if (loadingCard) loadingCard.replaceWith(card)
+    else stack.appendChild(card)
     attachSwipe(card)
     if (currentCard) currentCard.remove()
     currentCard = card
-    cardHistory.push({ candidate, section, savedIdx: sessionIdx - 1 })
+    cardHistory.push({ candidate, section, savedIdx: idxNow })
     if (cardHistory.length > 20) cardHistory.shift()
+
+    // Pre-fetch the next card in the background
+    prefetchNext().catch(() => {})
 
   } catch (e) {
     console.error('Card load failed:', candidate.title, e)
-    loadingCard.innerHTML = `<div class="empty-state">
-      <p>Couldn't load this card.</p>
-      <button class="btn-primary" onclick="">Next</button>
-    </div>`
-    loadingCard.querySelector('button').addEventListener('click', () => {
-      loadingCard.remove()
-      showNextCard('up')
-    })
+    if (loadingCard) {
+      loadingCard.innerHTML = `<div class="empty-state">
+        <p>Couldn't load this card.</p>
+        <button class="btn-primary">Next</button>
+      </div>`
+      loadingCard.querySelector('button').addEventListener('click', () => { loadingCard.remove(); showNextCard() })
+    } else {
+      await showNextCard(attempts + 1)
+    }
+  }
+}
+
+async function prefetchNext() {
+  nextCardData = null
+  if (sessionIdx >= session.length) return
+  const seenList = await db.getAll('seen')
+  const seenMap = new Map(seenList.map(s => [s.id, s]))
+  for (let i = sessionIdx; i < Math.min(sessionIdx + 5, session.length); i++) {
+    try {
+      const section = await pickSection(session[i].title, seenMap)
+      if (section) { nextCardData = { candidate: session[i], section, forIdx: i }; return }
+    } catch { /* skip this candidate */ }
   }
 }
 
@@ -149,10 +176,14 @@ function showSessionEnd() {
       <button class="btn-continue">Continue reading</button>
     </div>`
   stack.querySelector('.btn-continue').addEventListener('click', async () => {
-    currentCard = null
-    cardHistory = []
+    currentCard = null; cardHistory = []; nextCardData = null
     stack.innerHTML = '<div class="card-loading"><div class="spinner"></div><span>Building feed…</span></div>'
-    session = await buildSession()
+    // Use pre-built session if available, otherwise build fresh
+    if (nextSessionCache) {
+      session = nextSessionCache; nextSessionCache = null
+    } else {
+      session = await buildSession()
+    }
     sessionIdx = 0
     await showNextCard()
   })
@@ -165,12 +196,6 @@ function buildCard(candidate, section) {
   card.dataset.title = candidate.title
   card.dataset.anchor = section.anchor
 
-  // Provenance
-  const follows = []  // populated below
-  const via = candidate.via || ''
-  const provParts = buildProvenance(candidate)
-
-  // Section text with CSS-fade truncation
   const cleanedHTML = api.cleanHTML(section.html)
   const words = textWords(cleanedHTML)
   const PREVIEW_WORDS = 200
@@ -189,7 +214,7 @@ function buildCard(candidate, section) {
   card.innerHTML = `
     <div class="card-meta">
       <div class="card-article-title">${escHtml(candidate.title)}</div>
-      <div class="card-provenance" id="prov-${Date.now()}">${provParts}</div>
+      <div class="card-provenance">${buildProvenance(candidate)}</div>
     </div>
     <div class="card-body">
       <h2 class="card-section-heading">${escHtml(section.heading)}</h2>
@@ -199,29 +224,22 @@ function buildCard(candidate, section) {
       <button class="action-btn" data-action="know"  title="I know this">${ICONS.know}<span>I know this</span></button>
       <button class="action-btn" data-action="like"  title="More like this">${ICONS.like}<span>More like this</span></button>
       <button class="action-btn" data-action="save"  title="Save">${ICONS.save}<span>Save</span></button>
-      <button class="action-btn" data-action="open"  title="Open article">${ICONS.open}<span>Open article</span></button>
+      <button class="action-btn" data-action="share" title="Share">${ICONS.share}<span>Share</span></button>
+      <button class="action-btn" data-action="open"  title="Open article">${ICONS.open}<span>Open</span></button>
     </div>`
 
-  // Expand button
-  const expandBtn = card.querySelector('.expand-btn')
-  const truncated = card.querySelector('.section-truncated')
-  if (expandBtn && truncated) {
-    expandBtn.addEventListener('click', e => {
-      e.stopPropagation()
-      truncated.classList.add('expanded')
-    })
-  }
+  card.querySelector('.expand-btn')?.addEventListener('click', e => {
+    e.stopPropagation()
+    card.querySelector('.section-truncated')?.classList.add('expanded')
+  })
 
-  // Wiki link clicks
   card.querySelectorAll('.wiki-link').forEach(a => {
     a.addEventListener('click', e => {
       e.preventDefault()
-      const title = a.dataset.wiki
-      if (title) handleWikiLinkClick(title, candidate.title)
+      if (a.dataset.wiki) handleWikiLinkClick(a.dataset.wiki, candidate.title)
     })
   })
 
-  // Action buttons
   card.querySelectorAll('.action-btn').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation()
@@ -229,7 +247,6 @@ function buildCard(candidate, section) {
     })
   })
 
-  // Provenance step clicks
   card.querySelectorAll('.prov-step').forEach(span => {
     span.addEventListener('click', e => {
       e.stopPropagation()
@@ -242,68 +259,76 @@ function buildCard(candidate, section) {
 
 function buildProvenance(candidate) {
   if (!candidate.via) return '<span class="prov-step">Following</span>'
-
   const steps = []
-
-  if (candidate.type === '1hop') {
-    steps.push(`<span class="prov-step" data-title="${escAttr(candidate.via)}">${escHtml(candidate.via)}</span>`)
-  } else if (candidate.type === 'p800' && candidate.work) {
-    steps.push(`<span class="prov-step" data-title="${escAttr(candidate.via)}">${escHtml(candidate.via)}</span>`)
+  steps.push(`<span class="prov-step" data-title="${escAttr(candidate.via)}">${escHtml(candidate.via)}</span>`)
+  if ((candidate.type === 'p800' || candidate.type === '2hop') && candidate.work) {
     steps.push(`<span style="color:var(--border)">›</span>`)
     steps.push(`<span class="prov-step" data-title="${escAttr(candidate.work)}">${escHtml(candidate.work)}</span>`)
-  } else if (candidate.type === '2hop' && candidate.work) {
-    steps.push(`<span class="prov-step" data-title="${escAttr(candidate.via)}">${escHtml(candidate.via)}</span>`)
-    steps.push(`<span style="color:var(--border)">›</span>`)
-    steps.push(`<span class="prov-step" data-title="${escAttr(candidate.work)}">${escHtml(candidate.work)}</span>`)
-  } else {
-    steps.push(`<span class="prov-step" data-title="${escAttr(candidate.via)}">${escHtml(candidate.via)}</span>`)
   }
-
   return steps.join(' ')
 }
 
 async function showProvenanceMenu(el, title) {
-  // Simple: prompt to follow or mute
   const menu = document.createElement('div')
   menu.style.cssText = `
     position:fixed; background:var(--bg); border:1px solid var(--border);
-    border-radius:8px; padding:8px; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.15);
-    top:${el.getBoundingClientRect().bottom + 6}px;
+    border-radius:8px; padding:8px; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.2);
+    top:${Math.min(el.getBoundingClientRect().bottom + 6, window.innerHeight - 120)}px;
     left:${Math.min(el.getBoundingClientRect().left, window.innerWidth - 180)}px;
     min-width:160px; font-family:var(--sans); font-size:0.88em;`
 
   const follows = await db.getAll('follows')
   const isFollowed = follows.some(f => f.id === title)
-
   menu.innerHTML = `
-    <div style="padding:4px 8px 8px; font-weight:600; color:var(--text-dim); font-size:0.85em">${escHtml(title)}</div>
+    <div style="padding:4px 8px 8px; font-weight:600; color:var(--text-dim); font-size:0.85em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px">${escHtml(title)}</div>
     ${isFollowed
       ? `<button class="menu-btn" data-act="unfollow">Unfollow</button>`
       : `<button class="menu-btn" data-act="follow">Follow</button>`}
     <button class="menu-btn" data-act="mute">Mute this path</button>`
+  styleMenuBtns(menu)
   menu.querySelectorAll('.menu-btn').forEach(b => {
-    Object.assign(b.style, { display:'block', width:'100%', padding:'7px 8px',
-      background:'none', border:'none', cursor:'pointer', textAlign:'left',
-      color:'var(--text)', borderRadius:'4px' })
-    b.addEventListener('mouseover', () => b.style.background = 'var(--surface)')
-    b.addEventListener('mouseout', () => b.style.background = 'none')
     b.addEventListener('click', async () => {
-      if (b.dataset.act === 'follow') {
-        await db.put('follows', { id: title, type: 'link', addedAt: Date.now() })
-        showToast(`Now following ${title}`)
-      } else if (b.dataset.act === 'unfollow') {
-        await db.delete('follows', title)
-        showToast(`Unfollowed ${title}`)
-      } else if (b.dataset.act === 'mute') {
-        await db.put('seen', { id: title + '#any', action: 'mute', seenAt: Date.now() })
-        showToast(`Muted ${title}`)
-      }
+      if (b.dataset.act === 'follow') { await db.put('follows', { id: title, type: 'link', addedAt: Date.now() }); showToast(`Now following ${title}`) }
+      else if (b.dataset.act === 'unfollow') { await db.delete('follows', title); showToast(`Unfollowed ${title}`) }
+      else if (b.dataset.act === 'mute') { await db.put('seen', { id: title + '#any', action: 'mute', seenAt: Date.now() }); showToast(`Muted ${title}`) }
       menu.remove()
     })
   })
-
   document.body.appendChild(menu)
   const dismiss = e => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', dismiss) } }
+  setTimeout(() => document.addEventListener('click', dismiss), 10)
+}
+
+// ─── Wiki-link popup ──────────────────────────────────────────────────────────
+function handleWikiLinkClick(title, fromTitle) {
+  document.getElementById('wikilink-popup')?.remove()
+  const popup = document.createElement('div')
+  popup.id = 'wikilink-popup'
+  popup.style.cssText = `
+    position:fixed; background:var(--bg); border:1px solid var(--border);
+    border-radius:8px; padding:8px; z-index:100; box-shadow:0 4px 16px rgba(0,0,0,0.2);
+    bottom:calc(var(--nav-h) + 14px + var(--safe-bot)); left:50%;
+    transform:translateX(-50%); min-width:220px; max-width:85vw;
+    font-family:var(--sans); font-size:0.88em;`
+  popup.innerHTML = `
+    <div style="padding:4px 8px 8px; font-weight:600; color:var(--text-dim); font-size:0.85em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(title)}</div>
+    <button class="menu-btn" data-act="session">Add to this session</button>
+    <button class="menu-btn" data-act="follow">Follow</button>`
+  styleMenuBtns(popup)
+  popup.querySelectorAll('.menu-btn').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (b.dataset.act === 'session') {
+        session.splice(sessionIdx, 0, { title, score: 1.5, via: fromTitle, type: '1hop' })
+        showToast(`"${title}" added to session`)
+      } else if (b.dataset.act === 'follow') {
+        await db.put('follows', { id: title, type: 'link', addedAt: Date.now() })
+        showToast(`Following: ${title}`)
+      }
+      popup.remove()
+    })
+  })
+  document.body.appendChild(popup)
+  const dismiss = e => { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('click', dismiss) } }
   setTimeout(() => document.addEventListener('click', dismiss), 10)
 }
 
@@ -315,6 +340,10 @@ async function handleAction(action, candidate, section, card) {
   if (action === 'know') {
     await db.put('seen', { id: candidate.title + '#any', action: 'know', seenAt: Date.now() })
     btn.classList.add('active')
+    showToastWithUndo(`Marked as known`, async () => {
+      await db.delete('seen', candidate.title + '#any')
+      showToast('Undone')
+    })
     await nextCard(card)
 
   } else if (action === 'like') {
@@ -327,9 +356,7 @@ async function handleAction(action, candidate, section, card) {
   } else if (action === 'save') {
     const cleanText = plainTextFromHTML(api.cleanHTML(section.html))
     await db.put('saved', {
-      id,
-      title: candidate.title,
-      heading: section.heading,
+      id, title: candidate.title, heading: section.heading,
       text: cleanText.slice(0, 2000),
       html: api.cleanHTML(section.html),
       url: `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replace(/ /g, '_'))}#${section.anchor}`,
@@ -338,6 +365,15 @@ async function handleAction(action, candidate, section, card) {
     btn.classList.add('active')
     showToast('Saved')
     await db.put('seen', { id, action: 'save', seenAt: Date.now() })
+
+  } else if (action === 'share') {
+    const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replace(/ /g, '_'))}#${section.anchor}`
+    if (navigator.share) {
+      navigator.share({ title: `${candidate.title} — ${section.heading}`, url }).catch(() => {})
+    } else {
+      navigator.clipboard?.writeText(url).then(() => showToast('Link copied'))
+        .catch(() => showToast('Open in Wikipedia to share'))
+    }
 
   } else if (action === 'open') {
     const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replace(/ /g, '_'))}#${section.anchor}`
@@ -360,9 +396,10 @@ async function goBack(exitingCard) {
     exitingCard.style.opacity = ''
     return
   }
-  cardHistory.pop()  // discard current
+  cardHistory.pop()
   const prev = cardHistory[cardHistory.length - 1]
   sessionIdx = prev.savedIdx + 1
+  nextCardData = null  // invalidate pre-fetch since we're going back
 
   exitingCard.classList.add('exiting-right')
   await wait(280)
@@ -375,14 +412,10 @@ async function goBack(exitingCard) {
   currentCard = prevCard
 }
 
-function handleWikiLinkClick(title, fromTitle) {
-  showToast(`"${title}" — swipe to explore or follow from Threads`, 3000)
-}
-
 // ─── Swipe gesture controller ─────────────────────────────────────────────────
 function attachSwipe(card) {
   let startX = null, startY = null, pid = null
-  let dir = null  // 'h' | 'v' — locked in after first 10px
+  let dir = null  // 'h' | 'v' — locked in after first 10px of movement
 
   card.addEventListener('pointerdown', e => {
     if (e.target.closest('button, a, .wiki-link, .prov-step')) return
@@ -397,7 +430,7 @@ function attachSwipe(card) {
       if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return
       dir = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v'
       if (dir === 'h') card.setPointerCapture(pid)
-      else { startX = null; return }  // hand off to browser for vertical scroll
+      else { startX = null; return }
     }
     if (dir !== 'h') return
     card.style.transform = `translateX(${dx * 0.75}px)`
@@ -405,13 +438,10 @@ function attachSwipe(card) {
   })
 
   card.addEventListener('pointerup', async e => {
-    if (startX === null || dir !== 'h' || e.pointerId !== pid) {
-      startX = null; dir = null; return
-    }
+    if (startX === null || dir !== 'h' || e.pointerId !== pid) { startX = null; dir = null; return }
     const dx = e.clientX - startX
     startX = null; dir = null
     card.style.transform = ''; card.style.opacity = ''
-
     if (dx < -80) {
       await db.put('seen', { id: card.dataset.title + '#' + card.dataset.anchor, action: 'skip', seenAt: Date.now() })
       await nextCard(card)
@@ -426,7 +456,39 @@ function attachSwipe(card) {
   })
 }
 
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea, select, [contenteditable]')) return
+  if (e.metaKey || e.ctrlKey || e.altKey) return
+  if (!currentCard) return
+  if (e.key === 'ArrowLeft' || e.key === 'j') {
+    e.preventDefault()
+    db.put('seen', { id: currentCard.dataset.title + '#' + currentCard.dataset.anchor, action: 'skip', seenAt: Date.now() })
+      .then(() => nextCard(currentCard))
+  } else if (e.key === 'ArrowRight' || e.key === 'h') {
+    e.preventDefault()
+    goBack(currentCard)
+  } else if (e.key === 's') {
+    currentCard.querySelector('[data-action="save"]')?.click()
+  } else if (e.key === 'k') {
+    currentCard.querySelector('[data-action="know"]')?.click()
+  } else if (e.key === 'l') {
+    currentCard.querySelector('[data-action="like"]')?.click()
+  } else if (e.key === 'o') {
+    currentCard.querySelector('[data-action="open"]')?.click()
+  }
+})
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function styleMenuBtns(container) {
+  container.querySelectorAll('.menu-btn').forEach(b => {
+    Object.assign(b.style, { display:'block', width:'100%', padding:'7px 8px',
+      background:'none', border:'none', cursor:'pointer', textAlign:'left',
+      color:'var(--text)', borderRadius:'4px', fontFamily:'var(--sans)', fontSize:'0.95em' })
+    b.addEventListener('mouseover', () => b.style.background = 'var(--surface)')
+    b.addEventListener('mouseout', () => b.style.background = 'none')
+  })
+}
 
 function textWords(html) {
   const d = document.createElement('div')
@@ -440,21 +502,40 @@ function plainTextFromHTML(html) {
   return d.textContent.trim()
 }
 
-
 function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 function escAttr(str) { return escHtml(str) }
-
 function wait(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 // ─── Toast notifications ──────────────────────────────────────────────────────
 let toastTimer = null
+
 export function showToast(msg, duration = 2000) {
+  const toast = getOrCreateToast()
+  clearTimeout(toastTimer)
+  toast.style.pointerEvents = 'none'
+  toast.textContent = msg
+  toast.style.opacity = '1'
+  toastTimer = setTimeout(() => { toast.style.opacity = '0' }, duration)
+}
+
+function showToastWithUndo(msg, onUndo) {
+  const toast = getOrCreateToast()
+  clearTimeout(toastTimer)
+  toast.style.pointerEvents = 'auto'
+  toast.innerHTML = `<span>${escHtml(msg)}</span><button style="background:none;border:none;color:inherit;font:inherit;font-size:0.9em;text-decoration:underline;cursor:pointer;padding:0;margin-left:12px;">Undo</button>`
+  toast.style.opacity = '1'
+  toast.querySelector('button').addEventListener('click', () => {
+    clearTimeout(toastTimer)
+    toast.style.opacity = '0'
+    toast.style.pointerEvents = 'none'
+    onUndo()
+  }, { once: true })
+  toastTimer = setTimeout(() => { toast.style.opacity = '0'; toast.style.pointerEvents = 'none' }, 4000)
+}
+
+function getOrCreateToast() {
   let toast = document.getElementById('toast')
   if (!toast) {
     toast = document.createElement('div')
@@ -463,12 +544,9 @@ export function showToast(msg, duration = 2000) {
       position:fixed; bottom:calc(var(--nav-h) + 12px + var(--safe-bot)); left:50%;
       transform:translateX(-50%); background:var(--text); color:var(--bg);
       padding:8px 18px; border-radius:20px; font-size:0.85em; font-family:var(--sans);
-      z-index:200; opacity:0; transition:opacity 0.2s; pointer-events:none;
-      white-space:nowrap; max-width:90vw; overflow:hidden; text-overflow:ellipsis;`
+      z-index:200; opacity:0; transition:opacity 0.2s;
+      max-width:90vw; display:flex; align-items:center; white-space:nowrap;`
     document.body.appendChild(toast)
   }
-  toast.textContent = msg
-  toast.style.opacity = '1'
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toast.style.opacity = '0' }, duration)
+  return toast
 }

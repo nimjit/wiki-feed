@@ -119,6 +119,8 @@ html, body {
   will-change: transform;
   transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s;
   touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .card.exiting-left  { transform: translateX(-110%) }
@@ -233,7 +235,7 @@ html, body {
 /* Card actions */
 .card-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
   padding: 10px 14px 14px;
   border-top: 1px solid var(--border);
