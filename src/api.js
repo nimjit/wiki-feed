@@ -84,6 +84,17 @@ export function cleanHTML(rawHTML) {
 }
 
 // Extract body links (articles only, no navboxes/infoboxes)
+// Titles that are infrastructure / metadata — never surfaced as cards
+const SKIP_TITLE = /
+  \(identifier\)$
+  | ^(ISBN|ISSN|DOI|OCLC|PMID|PMC|arXiv|Bibcode|Zbl|MR|JFM|S2CID)\b
+  | ^Wayback\sMachine$
+  | ^List\sof\s
+  | ^Index\sof\s
+  | ^Outline\sof\s
+  | ^Glossary\sof\s
+/xi
+
 export function extractBodyLinks(rawHTML) {
   const doc = new DOMParser().parseFromString(rawHTML, 'text/html')
   STRIP_SELS.forEach(sel => doc.querySelectorAll(sel).forEach(el => el.remove()))
@@ -93,7 +104,7 @@ export function extractBodyLinks(rawHTML) {
   doc.querySelectorAll('a[href^="/wiki/"]').forEach(a => {
     const raw = a.getAttribute('href').slice(6).split('#')[0]
     const title = decodeURIComponent(raw).replace(/_/g, ' ')
-    if (!SKIP_NS.test(title) && !seen.has(title)) {
+    if (!SKIP_NS.test(title) && !SKIP_TITLE.test(title) && !seen.has(title)) {
       seen.add(title)
       links.push(title)
     }
