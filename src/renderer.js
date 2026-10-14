@@ -68,8 +68,8 @@ function showOnboarding() {
   })
 }
 
-async function showNextCard(direction = 'up') {
-  if (sessionIdx >= session.length) {
+async function showNextCard(direction = 'up', attempts = 0) {
+  if (sessionIdx >= session.length || attempts > 30) {
     showSessionEnd()
     return
   }
@@ -91,10 +91,9 @@ async function showNextCard(direction = 'up') {
     const section = await pickSection(candidate.title, seenMap)
 
     if (!section) {
-      // Article fully seen — try next
+      // No good section — skip this candidate (sessionIdx already incremented above)
       loadingCard.remove()
-      sessionIdx++  // skip
-      await showNextCard(direction)
+      await showNextCard(direction, attempts + 1)
       return
     }
 
@@ -126,6 +125,8 @@ function showSessionEnd() {
       <button class="btn-continue">Continue reading</button>
     </div>`
   stack.querySelector('.btn-continue').addEventListener('click', async () => {
+    currentCard = null
+    stack.innerHTML = '<div class="card-loading"><div class="spinner"></div><span>Building feed…</span></div>'
     session = await buildSession()
     sessionIdx = 0
     await showNextCard()

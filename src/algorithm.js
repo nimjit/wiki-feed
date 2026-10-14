@@ -18,10 +18,6 @@ async function ensureGraph(title) {
   try {
     const html = await api.getArticleHTML(title)
     links = api.extractBodyLinks(html)
-    // Quality check (fire and forget — don't block on it)
-    api.getQuality(title).then(q => {
-      db.put('graph', { ...cached, id: title, quality: q })
-    }).catch(() => {})
   } catch (e) {
     console.warn('Graph fetch failed:', title, e.message)
     links = cached?.links || []
@@ -30,6 +26,10 @@ async function ensureGraph(title) {
 
   const entry = { id: title, links, quality, fetchedAt: Date.now() }
   await db.put('graph', entry)
+  // Update quality when it arrives — spread entry (not cached) to keep links intact
+  api.getQuality(title).then(q => {
+    db.put('graph', { ...entry, quality: q })
+  }).catch(() => {})
   return entry
 }
 

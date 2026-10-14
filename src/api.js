@@ -4,20 +4,31 @@
 const WP_API = 'https://en.wikipedia.org/w/api.php'
 const WD_API = 'https://www.wikidata.org/w/api.php'
 
-async function wpFetch(params) {
+async function apiFetch(base, params, retries = 2) {
   params.format = 'json'
   params.origin = '*'
-  const r = await fetch(WP_API + '?' + new URLSearchParams(params))
-  if (!r.ok) throw new Error(`Wikipedia API ${r.status}: ${params.action}`)
-  return r.json()
+  const ctrl = new AbortController()
+  const timeout = setTimeout(() => ctrl.abort(), 12000)  // 12s hard timeout
+  try {
+    const r = await fetch(base + '?' + new URLSearchParams(params), { signal: ctrl.signal })
+    clearTimeout(timeout)
+    if (r.status === 429) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000))
+        return apiFetch(base, params, retries - 1)
+      }
+      throw new Error('Rate limited (429) — too many requests')
+    }
+    if (!r.ok) throw new Error(`API ${r.status}`)
+    return r.json()
+  } catch (e) {
+    clearTimeout(timeout)
+    throw e
+  }
 }
 
-async function wdFetch(params) {
-  params.format = 'json'
-  params.origin = '*'
-  const r = await fetch(WD_API + '?' + new URLSearchParams(params))
-  if (!r.ok) throw new Error(`Wikidata API ${r.status}`)
-  return r.json()
+function wpFetch(params, retries = 2) { return apiFetch(WP_API, params, retries) }
+function wdFetch(params, retries = 2) { return apiFetch(WD_API, params, retries) }
 }
 
 // ─── Article content ──────────────────────────────────────────────────────────
