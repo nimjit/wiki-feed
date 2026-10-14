@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="WikiFeed">
+  <meta name="theme-color" content="#1a1a1a">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <title>WikiFeed</title>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Feed ──────────────────────────────────────────────────────────── -->
+  <div id="screen-feed" class="screen active">
+    <div id="card-stack"></div>
+  </div>
+
+  <!-- ── Saved ─────────────────────────────────────────────────────────── -->
+  <div id="screen-saved" class="screen">
+    <div class="screen-header">Saved</div>
+    <div id="saved-list" style="overflow-y:auto; flex:1;"></div>
+  </div>
+
+  <!-- ── Threads ───────────────────────────────────────────────────────── -->
+  <div id="screen-threads" class="screen" style="overflow-y:auto;">
+    <div class="screen-header">Threads</div>
+
+    <!-- Follow search -->
+    <div class="search-bar">
+      <input id="follow-search" class="search-input" type="search"
+        placeholder="Search Wikipedia articles to follow…" autocomplete="off">
+      <button id="follow-go" class="search-go-btn">Search</button>
+    </div>
+    <div id="follow-results" class="search-results" style="max-height:260px; overflow-y:auto; border-bottom:1px solid var(--border);"></div>
+
+    <!-- Current follows -->
+    <div class="screen-subheader">Following</div>
+    <div id="follows-list"></div>
+  </div>
+
+  <!-- ── Settings ──────────────────────────────────────────────────────── -->
+  <div id="screen-settings" class="screen">
+    <div class="screen-header">Settings</div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Appearance</div>
+      <div class="settings-row">
+        <span>Theme</span>
+        <div class="theme-btns">
+          <button class="theme-btn" data-theme="light">Light</button>
+          <button class="theme-btn" data-theme="sepia">Sepia</button>
+          <button class="theme-btn" data-theme="dark">Dark</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span>Text size</span>
+        <div class="font-size-ctrl">
+          <button id="font-dec" class="font-size-btn">A−</button>
+          <span id="font-size-display" class="font-size-display">18px</span>
+          <button id="font-inc" class="font-size-btn">A+</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section" style="border-top:1px solid var(--border);">
+      <div class="settings-section-title">Data</div>
+      <div class="settings-row">
+        <span>Export follows, saves, history</span>
+        <button id="btn-export" class="settings-btn">Export JSON</button>
+      </div>
+      <div class="settings-row">
+        <span>Import from backup</span>
+        <button id="btn-import" class="settings-btn">Import JSON</button>
+      </div>
+    </div>
+
+    <div class="settings-section" style="border-top:1px solid var(--border);">
+      <div class="settings-section-title">About</div>
+      <div class="settings-row" style="flex-direction:column; align-items:flex-start; gap:6px;">
+        <span style="font-size:0.9em; color:var(--text-dim);">
+          WikiFeed surfaces Wikipedia section cards routed by your interests.
+          No LLM in the content path — all text is Wikipedia's own writing.
+          Algorithm is local, transparent, with no engagement optimisation.
+        </span>
+        <span style="font-size:0.8em; color:var(--text-dim); margin-top:4px;">
+          v0 · Content from <a href="https://en.wikipedia.org" target="_blank" rel="noopener" style="color:var(--accent);">Wikipedia</a> via the Wikimedia APIs
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Bottom nav ────────────────────────────────────────────────────── -->
+  <nav id="nav">
+    <button id="nav-feed" class="nav-btn active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <rect x="3" y="3" width="18" height="7" rx="2"/>
+        <rect x="3" y="14" width="18" height="7" rx="2"/>
+      </svg>
+      Feed
+    </button>
+    <button id="nav-saved" class="nav-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+      </svg>
+      Saved
+    </button>
+    <button id="nav-threads" class="nav-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="12" cy="5" r="3"/>
+        <circle cx="5" cy="19" r="3"/>
+        <circle cx="19" cy="19" r="3"/>
+        <line x1="12" y1="8" x2="5" y2="16"/>
+        <line x1="12" y1="8" x2="19" y2="16"/>
+      </svg>
+      Threads
+    </button>
+    <button id="nav-settings" class="nav-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      Settings
+    </button>
+  </nav>
+
+</div><!-- #app -->
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
