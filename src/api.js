@@ -85,15 +85,7 @@ export function cleanHTML(rawHTML) {
 
 // Extract body links (articles only, no navboxes/infoboxes)
 // Titles that are infrastructure / metadata — never surfaced as cards
-const SKIP_TITLE = /
-  \(identifier\)$
-  | ^(ISBN|ISSN|DOI|OCLC|PMID|PMC|arXiv|Bibcode|Zbl|MR|JFM|S2CID)\b
-  | ^Wayback\sMachine$
-  | ^List\sof\s
-  | ^Index\sof\s
-  | ^Outline\sof\s
-  | ^Glossary\sof\s
-/xi
+const SKIP_TITLE = /\(identifier\)$|^(ISBN|ISSN|DOI|OCLC|PMID|PMC|arXiv|Bibcode|Zbl|MR|JFM|S2CID)\b|^Wayback Machine$|^List of |^Index of |^Outline of |^Glossary of /i
 
 export function extractBodyLinks(rawHTML) {
   const doc = new DOMParser().parseFromString(rawHTML, 'text/html')
