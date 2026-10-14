@@ -1,4 +1,4 @@
-import { open } from './db.js'
+import { open, db } from './db.js'
 import { init as initRouter } from './router.js'
 
 // Register service worker
@@ -24,7 +24,6 @@ async function main() {
   await open()
 
   // Mirror prefs to localStorage for fast next-load read
-  const { db } = await import('./db.js')
   db.getSetting('theme', 'light').then(t => localStorage.setItem('wf-theme', t))
   db.getSetting('fontSize', 18).then(s => localStorage.setItem('wf-fontsize', String(s)))
 
