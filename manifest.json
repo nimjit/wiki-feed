@@ -4,7 +4,7 @@
   "description": "A deliberate Wikipedia reading feed — section cards, local algorithm, no engagement tricks",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "background_color": "#121212",
   "theme_color": "#1a1a1a",
   "orientation": "portrait",
   "icons": [

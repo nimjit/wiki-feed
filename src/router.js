@@ -66,14 +66,23 @@ function showSavedDetail(item) {
   const overlay = document.createElement('div')
   overlay.style.cssText = `
     position:fixed; inset:0; background:var(--bg); z-index:50;
-    overflow-y:auto; padding:20px 20px 80px;`
+    overflow-y:auto;
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px calc(env(safe-area-inset-bottom, 0px) + 80px);`
   overlay.innerHTML = `
-    <button id="saved-back" style="
-      display:flex; align-items:center; gap:6px; background:none; border:none;
-      cursor:pointer; color:var(--accent); font-size:0.95em; margin-bottom:16px;
-      font-family:var(--sans); padding:0;">
-      ← Back
-    </button>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <button id="saved-back" style="
+        display:flex; align-items:center; gap:6px; background:none; border:none;
+        cursor:pointer; color:var(--accent); font-size:0.95em;
+        font-family:var(--sans); padding:0;">
+        ← Back
+      </button>
+      <button id="saved-remove" style="
+        background:none; border:1px solid var(--border); border-radius:12px;
+        padding:4px 12px; font-size:0.8em; font-family:var(--sans);
+        color:var(--text-dim); cursor:pointer;">
+        Remove
+      </button>
+    </div>
     <div style="font-family:var(--sans); font-size:0.8em; text-transform:uppercase;
       letter-spacing:0.08em; color:var(--accent); margin-bottom:8px;">${escHtml(item.title)}</div>
     <h2 style="font-family:var(--serif); font-size:1.4em; margin-bottom:16px; line-height:1.35;">${escHtml(item.heading)}</h2>
@@ -85,6 +94,11 @@ function showSavedDetail(item) {
       </a>
     </div>`
   overlay.querySelector('#saved-back').addEventListener('click', () => overlay.remove())
+  overlay.querySelector('#saved-remove').addEventListener('click', async () => {
+    await db.delete('saved', item.id)
+    overlay.remove()
+    renderSaved()
+  })
   document.body.appendChild(overlay)
 }
 
@@ -170,7 +184,7 @@ async function runSearch(query, resultsEl) {
 // ─── Settings screen ──────────────────────────────────────────────────────────
 async function renderSettings() {
   // Theme
-  const theme = await db.getSetting('theme', 'light')
+  const theme = await db.getSetting('theme', 'dark')
   document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.theme === theme)
     btn.addEventListener('click', async () => {

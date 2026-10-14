@@ -13,7 +13,7 @@ if ('serviceWorker' in navigator) {
 // Apply saved theme + font size before render to avoid flash
 async function applyStoredPrefs() {
   // Use localStorage as a fast sync read for visual prefs (avoids IDB async flash)
-  const theme = localStorage.getItem('wf-theme') || 'light'
+  const theme = localStorage.getItem('wf-theme') || 'dark'
   const size  = parseInt(localStorage.getItem('wf-fontsize') || '18')
   document.documentElement.dataset.theme = theme
   document.documentElement.style.fontSize = size + 'px'

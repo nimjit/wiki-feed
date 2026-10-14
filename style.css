@@ -117,15 +117,12 @@ html, body {
   background: var(--bg);
   overflow: hidden;
   will-change: transform;
-  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-  touch-action: none;
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s;
+  touch-action: pan-y;
 }
 
-.card.exiting-up    { transform: translateY(-100%) }
-.card.exiting-down  { transform: translateY(100%) }
-.card.entering-up   { transform: translateY(100%) }
-.card.entering-down { transform: translateY(-100%) }
-.card.entering-up.active, .card.entering-down.active { transform: translateY(0) }
+.card.exiting-left  { transform: translateX(-110%) }
+.card.exiting-right { transform: translateX(110%) }
 
 /* Card meta bar */
 .card-meta {

@@ -124,6 +124,8 @@ async function showNextCard(direction = 'up', attempts = 0) {
     attachSwipe(card)
     if (currentCard) currentCard.remove()
     currentCard = card
+    cardHistory.push({ candidate, section, savedIdx: sessionIdx - 1 })
+    if (cardHistory.length > 20) cardHistory.shift()
 
   } catch (e) {
     console.error('Card load failed:', candidate.title, e)
@@ -148,6 +150,7 @@ function showSessionEnd() {
     </div>`
   stack.querySelector('.btn-continue').addEventListener('click', async () => {
     currentCard = null
+    cardHistory = []
     stack.innerHTML = '<div class="card-loading"><div class="spinner"></div><span>Building feed…</span></div>'
     session = await buildSession()
     sessionIdx = 0
@@ -312,14 +315,14 @@ async function handleAction(action, candidate, section, card) {
   if (action === 'know') {
     await db.put('seen', { id: candidate.title + '#any', action: 'know', seenAt: Date.now() })
     btn.classList.add('active')
-    await nextCard(card, 'up')
+    await nextCard(card)
 
   } else if (action === 'like') {
     await db.put('follows', { id: candidate.title, type: 'like', addedAt: Date.now() })
     await db.put('seen', { id, action: 'like', seenAt: Date.now() })
     btn.classList.add('active')
     showToast(`Following: ${candidate.title}`)
-    await nextCard(card, 'up')
+    await nextCard(card)
 
   } else if (action === 'save') {
     const cleanText = plainTextFromHTML(api.cleanHTML(section.html))
@@ -343,63 +346,83 @@ async function handleAction(action, candidate, section, card) {
   }
 }
 
-async function nextCard(exitingCard, direction) {
-  exitingCard.classList.add(direction === 'up' ? 'exiting-up' : 'exiting-down')
-  await wait(300)
+async function nextCard(exitingCard) {
+  exitingCard.classList.add('exiting-left')
+  await wait(280)
   exitingCard.remove()
-  await showNextCard(direction)
+  await showNextCard()
+}
+
+async function goBack(exitingCard) {
+  if (cardHistory.length < 2) {
+    showToast('Already at the first card')
+    exitingCard.style.transform = ''
+    exitingCard.style.opacity = ''
+    return
+  }
+  cardHistory.pop()  // discard current
+  const prev = cardHistory[cardHistory.length - 1]
+  sessionIdx = prev.savedIdx + 1
+
+  exitingCard.classList.add('exiting-right')
+  await wait(280)
+  exitingCard.remove()
+
+  const stack = document.getElementById('card-stack')
+  const prevCard = buildCard(prev.candidate, prev.section)
+  stack.appendChild(prevCard)
+  attachSwipe(prevCard)
+  currentCard = prevCard
 }
 
 function handleWikiLinkClick(title, fromTitle) {
-  // Show quick-follow prompt
   showToast(`"${title}" — swipe to explore or follow from Threads`, 3000)
 }
 
 // ─── Swipe gesture controller ─────────────────────────────────────────────────
 function attachSwipe(card) {
-  let startY = null
-  let dragging = false
+  let startX = null, startY = null, pid = null
+  let dir = null  // 'h' | 'v' — locked in after first 10px
 
   card.addEventListener('pointerdown', e => {
-    // Only start drag from meta/actions zones — not the scrollable body content
-    if (e.target.closest('.card-body, button, a, .wiki-link, .prov-step')) return
-    startY = e.clientY
-    dragging = true
-    card.setPointerCapture(e.pointerId)
+    if (e.target.closest('button, a, .wiki-link, .prov-step')) return
+    startX = e.clientX; startY = e.clientY; pid = e.pointerId; dir = null
   })
 
   card.addEventListener('pointermove', e => {
-    if (!dragging || startY === null) return
+    if (startX === null || e.pointerId !== pid) return
+    const dx = e.clientX - startX
     const dy = e.clientY - startY
-    card.style.transform = `translateY(${dy * 0.4}px)`
-    card.style.opacity = String(1 - Math.abs(dy) / 400)
+    if (!dir) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return
+      dir = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v'
+      if (dir === 'h') card.setPointerCapture(pid)
+      else { startX = null; return }  // hand off to browser for vertical scroll
+    }
+    if (dir !== 'h') return
+    card.style.transform = `translateX(${dx * 0.75}px)`
+    card.style.opacity = String(1 - Math.abs(dx) / 500)
   })
 
   card.addEventListener('pointerup', async e => {
-    if (!dragging) return
-    dragging = false
-    const dy = e.clientY - startY
-    startY = null
-    card.style.transform = ''
-    card.style.opacity = ''
-
-    if (dy < -80) {
-      // Swipe up → next card
-      await db.put('seen', {
-        id: card.dataset.title + '#' + card.dataset.anchor,
-        action: 'skip',
-        seenAt: Date.now(),
-      })
-      await nextCard(card, 'up')
+    if (startX === null || dir !== 'h' || e.pointerId !== pid) {
+      startX = null; dir = null; return
     }
-    // Swipe down: could go back — not implemented in v0
+    const dx = e.clientX - startX
+    startX = null; dir = null
+    card.style.transform = ''; card.style.opacity = ''
+
+    if (dx < -80) {
+      await db.put('seen', { id: card.dataset.title + '#' + card.dataset.anchor, action: 'skip', seenAt: Date.now() })
+      await nextCard(card)
+    } else if (dx > 80) {
+      await goBack(card)
+    }
   })
 
   card.addEventListener('pointercancel', () => {
-    dragging = false
-    startY = null
-    card.style.transform = ''
-    card.style.opacity = ''
+    startX = null; dir = null
+    card.style.transform = ''; card.style.opacity = ''
   })
 }
 
