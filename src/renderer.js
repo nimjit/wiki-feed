@@ -141,21 +141,18 @@ function buildCard(candidate, section) {
   const via = candidate.via || ''
   const provParts = buildProvenance(candidate)
 
-  // Section text with truncation
+  // Section text with CSS-fade truncation
   const cleanedHTML = api.cleanHTML(section.html)
   const words = textWords(cleanedHTML)
   const PREVIEW_WORDS = 200
 
   let bodyHTML
   if (words.length <= PREVIEW_WORDS) {
-    bodyHTML = `<div class="card-section-text">${cleanedHTML}</div>`
+    bodyHTML = `<div class="card-section-text"><div class="section-head" style="max-height:none">${cleanedHTML}</div></div>`
   } else {
-    const preview = buildPreview(cleanedHTML, PREVIEW_WORDS)
-    const tail = buildTail(cleanedHTML, PREVIEW_WORDS)
     bodyHTML = `
       <div class="card-section-text section-truncated">
-        <div class="section-head">${preview}</div>
-        <div class="section-tail">${tail}</div>
+        <div class="section-head">${cleanedHTML}</div>
         <button class="expand-btn">Read more (${words.length} words)</button>
       </div>`
   }
@@ -394,21 +391,6 @@ function plainTextFromHTML(html) {
   return d.textContent.trim()
 }
 
-// Split HTML at word boundary for preview/tail
-function buildPreview(html, wordLimit) {
-  const d = document.createElement('div')
-  d.innerHTML = html
-  const walker = document.createTreeWalker(d, NodeFilter.SHOW_TEXT)
-  let count = 0
-  const node = walker.nextNode()
-  // Simplified: just show full HTML, let CSS handle fade
-  // For accuracy, we'd need a proper truncator; skip complexity for v0
-  return html
-}
-
-function buildTail(html, wordLimit) {
-  return ''  // expanded state just shows full section
-}
 
 function escHtml(str) {
   return String(str)

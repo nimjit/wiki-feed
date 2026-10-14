@@ -189,19 +189,25 @@ html, body {
 .card-section-text p { margin-bottom: 0.9em }
 .card-section-text p:last-child { margin-bottom: 0 }
 
-/* Section text truncation */
-.section-truncated { position: relative }
-.section-truncated .section-tail {
-  display: none;
+/* Section text truncation — CSS fade approach */
+.section-head {
+  max-height: 52vh;
+  overflow: hidden;
+  position: relative;
 }
-.section-truncated.expanded .section-tail {
-  display: block;
-}
-.section-truncated::after {
+.section-head::after {
   content: '';
-  display: block;
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 90px;
+  background: linear-gradient(to bottom, transparent, var(--bg));
+  pointer-events: none;
 }
-.section-truncated.expanded::after { display: none }
+.section-truncated.expanded .section-head {
+  max-height: none;
+  overflow: visible;
+}
+.section-truncated.expanded .section-head::after { display: none }
 
 .expand-btn {
   display: inline-block;
