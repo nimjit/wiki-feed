@@ -26,6 +26,9 @@ let currentCard = null
 
 // ─── Build & display the feed ─────────────────────────────────────────────────
 export async function initFeed() {
+  // Don't overwrite an active session when switching tabs
+  if (session.length > 0 && sessionIdx < session.length) return
+
   const stack = document.getElementById('card-stack')
   stack.innerHTML = '<div class="card-loading"><div class="spinner"></div><span>Building feed…</span></div>'
 

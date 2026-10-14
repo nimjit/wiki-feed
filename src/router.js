@@ -11,6 +11,7 @@ export function navigate(name) {
     document.getElementById('screen-' + s)?.classList.toggle('active', s === name)
     document.getElementById('nav-' + s)?.classList.toggle('active', s === name)
   })
+  if (name === 'feed')     initFeed()
   if (name === 'saved')    renderSaved()
   if (name === 'threads')  renderThreads()
   if (name === 'settings') renderSettings()
